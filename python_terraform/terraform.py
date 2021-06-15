@@ -290,6 +290,7 @@ class Terraform:
         capture_output: Union[bool, str] = True,
         raise_on_error: bool = True,
         synchronous: bool = True,
+        verbose: bool = False,
         **kwargs,
     ) -> CommandOutput:
         """Run a terraform command, if success, will try to read state file
@@ -337,15 +338,24 @@ class Terraform:
         if self.is_env_vars_included:
             environ_vars = os.environ.copy()
 
-        p = subprocess.Popen(
+        with subprocess.Popen(
             cmds, stdout=stdout, stderr=stderr, cwd=working_folder, env=environ_vars
-        )
+        ) as p:
 
-        if not synchronous:
-            return None, None, None
+            if not synchronous:
+                return None, None, None
+            
+            live_out = []
+            if verbose and p.stdout:
+                print('live output: """')
+                for line in p.stdout:
+                    live_out.append(str(line, "utf-8").rstrip())
+                    print(f"    {live_out[-1]}")
+                print('"""')
 
-        out, err = p.communicate()
-        ret_code = p.returncode
+            out, err = p.communicate()
+            ret_code = p.returncode
+        
         logger.info("output: %s", out)
 
         if ret_code == 0:
@@ -354,12 +364,14 @@ class Terraform:
             logger.warning("error: %s", err)
 
         self.temp_var_files.clean_up()
-        if capture_output is True:
-            out = out.decode()
-            err = err.decode()
-        else:
-            out = None
-            err = None
+        out = None
+        err = None
+        if verbose and capture_output:
+            out = "\n".join(live_out)
+            err = err.decode("utf-8")
+        elif capture_output:
+            out = out.decode("utf-8")
+            err = err.decode("utf-8")
 
         if ret_code and raise_on_error:
             raise TerraformCommandError(ret_code, " ".join(cmds), out=out, err=err)
